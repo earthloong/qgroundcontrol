@@ -340,7 +340,10 @@ int MissionController::insertSimpleMissionItem(QGeoCoordinate coordinate, int i)
     newItem->setCommand(MavlinkQmlSingleton::MAV_CMD_NAV_WAYPOINT);
     _initVisualItem(newItem);
     if (_visualItems->count() == 1) {
-        newItem->setCommand(_controllerVehicle->vtol() ? MavlinkQmlSingleton::MAV_CMD_NAV_VTOL_TAKEOFF : MavlinkQmlSingleton::MAV_CMD_NAV_TAKEOFF);
+        MavlinkQmlSingleton::Qml_MAV_CMD takeoffCmd = _controllerVehicle->vtol() ? MavlinkQmlSingleton::MAV_CMD_NAV_VTOL_TAKEOFF : MavlinkQmlSingleton::MAV_CMD_NAV_TAKEOFF;
+        if (_controllerVehicle->firmwarePlugin()->supportedMissionCommands().contains((MAV_CMD)takeoffCmd)) {
+            newItem->setCommand(takeoffCmd);
+        }
     }
     newItem->setDefaultsForCommand();
     if ((MAV_CMD)newItem->command() == MAV_CMD_NAV_WAYPOINT) {
@@ -351,6 +354,30 @@ int MissionController::insertSimpleMissionItem(QGeoCoordinate coordinate, int i)
             newItem->missionItem().setFrame(prevFrame);
             newItem->missionItem().setParam7(prevAltitude);
         }
+    }
+    _visualItems->insert(i, newItem);
+
+    _recalcAll();
+
+    return newItem->sequenceNumber();
+}
+
+int MissionController::insertROIMissionItem(QGeoCoordinate coordinate, int i)
+{
+    int sequenceNumber = _nextSequenceNumber();
+    SimpleMissionItem * newItem = new SimpleMissionItem(_controllerVehicle, this);
+    newItem->setSequenceNumber(sequenceNumber);
+    newItem->setCoordinate(coordinate);
+    newItem->setCommand(MavlinkQmlSingleton::MAV_CMD_DO_SET_ROI);
+    _initVisualItem(newItem);
+    newItem->setDefaultsForCommand();
+
+    double      prevAltitude;
+    MAV_FRAME   prevFrame;
+
+    if (_findPreviousAltitude(i, &prevAltitude, &prevFrame)) {
+        newItem->missionItem().setFrame(prevFrame);
+        newItem->missionItem().setParam7(prevAltitude);
     }
     _visualItems->insert(i, newItem);
 
@@ -1009,8 +1036,9 @@ void MissionController::_recalcWaypointLines(void)
         // If we still haven't found the first coordinate item and we hit a takeoff command, link back to home
         if (firstCoordinateItem &&
                 item->isSimpleItem() &&
-                (qobject_cast<SimpleMissionItem*>(item)->command() == MavlinkQmlSingleton::MAV_CMD_NAV_TAKEOFF ||
-                 qobject_cast<SimpleMissionItem*>(item)->command() == MavlinkQmlSingleton::MAV_CMD_NAV_VTOL_TAKEOFF)) {
+                (!_controllerVehicle->firmwarePlugin()->supportedMissionCommands().contains(MAV_CMD_NAV_TAKEOFF) ||
+                    qobject_cast<SimpleMissionItem*>(item)->command() == MavlinkQmlSingleton::MAV_CMD_NAV_TAKEOFF ||
+                    qobject_cast<SimpleMissionItem*>(item)->command() == MavlinkQmlSingleton::MAV_CMD_NAV_VTOL_TAKEOFF)) {
             linkStartToHome = true;
         }
 

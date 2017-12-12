@@ -233,10 +233,12 @@ QT += \
         multimedia
 }
 
-!MobileBuild {
-QT += \
-    printsupport \
-    serialport \
+AndroidBuild || iOSBuild {
+    # Android and iOS don't unclude these
+} else {
+    QT += \
+        printsupport \
+        serialport \
 }
 
 contains(DEFINES, QGC_ENABLE_BLUETOOTH) {
@@ -259,12 +261,6 @@ DebugBuild {
 !iOSBuild {
     CONFIG += console
 }
-}
-
-!MobileBuild {
-# qextserialport should not be used by general QGroundControl code. Use QSerialPort instead. This is only
-# here to support special case Firmware Upgrade code.
-include(libs/qextserialport/src/qextserialport.pri)
 }
 
 #
