@@ -61,7 +61,7 @@ public:
     QString         mapVisualQML        (void) const override = 0;
     bool            load                (const QJsonObject& complexObject, int sequenceNumber, QString& errorString) override = 0;
 
-    double          complexDistance     (void) const final { return _scanDistance; }
+    double          complexDistance     (void) const final { return _complexDistance; }
     double          greatestDistanceTo  (const QGeoCoordinate &other) const final;
 
     // Overrides from VisualMissionItem
@@ -104,7 +104,6 @@ signals:
     void cameraShotsChanged             (void);
     void timeBetweenShotsChanged        (void);
     void cameraMinTriggerIntervalChanged(double cameraMinTriggerInterval);
-    void altitudeRelativeChanged        (bool altitudeRelative);
     void transectPointsChanged          (void);
     void coveredAreaChanged             (void);
 
@@ -112,6 +111,7 @@ protected slots:
     virtual void _rebuildTransects          (void) = 0;
 
     void _setDirty                          (void);
+    void _setIfDirty                        (bool dirty);
     void _updateCoordinateAltitudes         (void);
     void _signalLastSequenceNumberChanged   (void);
 
@@ -119,7 +119,6 @@ protected:
     void    _save               (QJsonObject& saveObject);
     bool    _load               (const QJsonObject& complexObject, QString& errorString);
     void    _setExitCoordinate  (const QGeoCoordinate& coordinate);
-    void    _setScanDistance    (double scanDistance);
     void    _setCameraShots     (int cameraShots);
     double  _triggerDistance    (void) const;
     int     _transectCount      (void) const;
@@ -135,7 +134,7 @@ protected:
     QGCMapPolygon   _surveyAreaPolygon;
 
     bool            _ignoreRecalc;
-    double          _scanDistance;
+    double          _complexDistance;
     int             _cameraShots;
     double          _timeBetweenShots;
     double          _cameraMinTriggerInterval;

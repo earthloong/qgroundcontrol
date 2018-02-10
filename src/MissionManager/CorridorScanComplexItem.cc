@@ -36,27 +36,22 @@ CorridorScanComplexItem::CorridorScanComplexItem(Vehicle* vehicle, QObject* pare
 {
     _editorQml = "qrc:/qml/CorridorScanEditor.qml";
 
+    // We override the altitude to the mission default
+    if (_cameraCalc.isManualCamera() || !_cameraCalc.valueSetIsDistance()->rawValue().toBool()) {
+        _cameraCalc.distanceToSurface()->setRawValue(qgcApp()->toolbox()->settingsManager()->appSettings()->defaultMissionItemAltitude()->rawValue());
+    }
+
     connect(&_corridorWidthFact,    &Fact::valueChanged,                                this, &CorridorScanComplexItem::_setDirty);
     connect(&_corridorPolyline,     &QGCMapPolyline::pathChanged,                       this, &CorridorScanComplexItem::_setDirty);
-    connect(this,                   &CorridorScanComplexItem::altitudeRelativeChanged,  this, &CorridorScanComplexItem::_setDirty);
 
-    connect(this, &CorridorScanComplexItem::altitudeRelativeChanged,       this, &CorridorScanComplexItem::coordinateHasRelativeAltitudeChanged);
-    connect(this, &CorridorScanComplexItem::altitudeRelativeChanged,       this, &CorridorScanComplexItem::exitCoordinateHasRelativeAltitudeChanged);
+    connect(&_cameraCalc,           &CameraCalc::distanceToSurfaceRelativeChanged, this, &CorridorScanComplexItem::coordinateHasRelativeAltitudeChanged);
+    connect(&_cameraCalc,           &CameraCalc::distanceToSurfaceRelativeChanged, this, &CorridorScanComplexItem::exitCoordinateHasRelativeAltitudeChanged);
 
-    connect(&_corridorPolyline, &QGCMapPolyline::dirtyChanged,  this, &CorridorScanComplexItem::_polylineDirtyChanged);
-    connect(&_corridorPolyline, &QGCMapPolyline::countChanged,  this, &CorridorScanComplexItem::_polylineCountChanged);
-
-    connect(_cameraCalc.adjustedFootprintSide(), &Fact::valueChanged, this, &CorridorScanComplexItem::_rebuildTransects);
+    connect(&_corridorPolyline,     &QGCMapPolyline::dirtyChanged,  this, &CorridorScanComplexItem::_polylineDirtyChanged);
+    connect(&_corridorPolyline,     &QGCMapPolyline::countChanged,  this, &CorridorScanComplexItem::_polylineCountChanged);
 
     connect(&_corridorPolyline,     &QGCMapPolyline::pathChanged,   this, &CorridorScanComplexItem::_rebuildCorridor);
     connect(&_corridorWidthFact,    &Fact::valueChanged,            this, &CorridorScanComplexItem::_rebuildCorridor);
-
-    connect(&_corridorPolyline,                     &QGCMapPolyline::countChanged,  this, &CorridorScanComplexItem::_signalLastSequenceNumberChanged);
-    connect(&_corridorWidthFact,                    &Fact::valueChanged,            this, &CorridorScanComplexItem::_signalLastSequenceNumberChanged);
-    connect(_cameraCalc.adjustedFootprintSide(),    &Fact::valueChanged,            this, &CorridorScanComplexItem::_signalLastSequenceNumberChanged);
-
-    connect(this, &CorridorScanComplexItem::transectPointsChanged, this, &CorridorScanComplexItem::complexDistanceChanged);
-    connect(this, &CorridorScanComplexItem::transectPointsChanged, this, &CorridorScanComplexItem::greatestDistanceToChanged);
 
     _rebuildCorridor();
 }
@@ -69,7 +64,17 @@ void CorridorScanComplexItem::_polylineCountChanged(int count)
 
 int CorridorScanComplexItem::lastSequenceNumber(void) const
 {
-    return _sequenceNumber + ((_corridorPolyline.count() + 2 /* trigger start/stop */ + (_hasTurnaround() ? 2 : 0)) * _transectCount());
+    int itemCount = _transectPoints.count();    // Each transpect point represents a waypoint item
+
+    if (_cameraTriggerInTurnAroundFact.rawValue().toBool()) {
+        // Only one camera start and on camera stop
+        itemCount += 2;
+    } else {
+        // Each transect will have a camera start and stop in it
+        itemCount += _transectCount() * 2;
+    }
+
+    return _sequenceNumber + itemCount - 1;
 }
 
 void CorridorScanComplexItem::save(QJsonArray&  missionItems)
@@ -110,7 +115,9 @@ bool CorridorScanComplexItem::load(const QJsonObject& complexObject, int sequenc
         return false;
     }
 
-    _corridorPolyline.clear();
+    if (!_corridorPolyline.loadFromJson(complexObject, true, errorString)) {
+        return false;
+    }
 
     QString itemType = complexObject[VisualMissionItem::jsonTypeKey].toString();
     QString complexType = complexObject[ComplexMissionItem::jsonComplexItemTypeKey].toString();
@@ -154,8 +161,9 @@ int CorridorScanComplexItem::_transectCount(void) const
 
 void CorridorScanComplexItem::appendMissionItems(QList<MissionItem*>& items, QObject* missionItemParent)
 {
-    int seqNum =        _sequenceNumber;
-    int pointIndex =    0;
+    int seqNum =            _sequenceNumber;
+    int pointIndex =        0;
+    bool imagesEverywhere = _cameraTriggerInTurnAroundFact.rawValue().toBool();
 
     while (pointIndex < _transectPoints.count()) {
         if (_hasTurnaround()) {
@@ -174,9 +182,22 @@ void CorridorScanComplexItem::appendMissionItems(QList<MissionItem*>& items, QOb
                                                 false,                                                  // isCurrentItem
                                                 missionItemParent);
             items.append(item);
+            if (imagesEverywhere && pointIndex == 1) {
+                item = new MissionItem(seqNum++,
+                                       MAV_CMD_DO_SET_CAM_TRIGG_DIST,
+                                       MAV_FRAME_MISSION,
+                                       _cameraCalc.adjustedFootprintFrontal()->rawValue().toDouble(),   // trigger distance
+                                       0,                                                               // shutter integration (ignore)
+                                       1,                                                               // trigger immediately when starting
+                                       0, 0, 0, 0,                                                      // param 4-7 unused
+                                       true,                                                            // autoContinue
+                                       false,                                                           // isCurrentItem
+                                       missionItemParent);
+                items.append(item);
+            }
         }
 
-        bool addTrigger = true;
+        bool addTrigger = imagesEverywhere ? false : true;
         for (int i=0; i<_corridorPolyline.count(); i++) {
             QGeoCoordinate vertexCoord = _transectPoints[pointIndex++].value<QGeoCoordinate>();
             MissionItem* item = new MissionItem(seqNum++,
@@ -210,17 +231,19 @@ void CorridorScanComplexItem::appendMissionItems(QList<MissionItem*>& items, QOb
             }
         }
 
-        MissionItem* item = new MissionItem(seqNum++,
-                                            MAV_CMD_DO_SET_CAM_TRIGG_DIST,
-                                            MAV_FRAME_MISSION,
-                                            0,           // stop triggering
-                                            0,           // shutter integration (ignore)
-                                            0,           // trigger immediately when starting
-                                            0, 0, 0, 0,  // param 4-7 unused
-                                            true,        // autoContinue
-                                            false,       // isCurrentItem
-                                            missionItemParent);
-        items.append(item);
+        if (!imagesEverywhere) {
+            MissionItem* item = new MissionItem(seqNum++,
+                                                MAV_CMD_DO_SET_CAM_TRIGG_DIST,
+                                                MAV_FRAME_MISSION,
+                                                0,           // stop triggering
+                                                0,           // shutter integration (ignore)
+                                                0,           // trigger immediately when starting
+                                                0, 0, 0, 0,  // param 4-7 unused
+                                                true,        // autoContinue
+                                                false,       // isCurrentItem
+                                                missionItemParent);
+            items.append(item);
+        }
 
         if (_hasTurnaround()) {
             QGeoCoordinate vertexCoord = _transectPoints[pointIndex++].value<QGeoCoordinate>();
@@ -240,13 +263,27 @@ void CorridorScanComplexItem::appendMissionItems(QList<MissionItem*>& items, QOb
             items.append(item);
         }
     }
+
+    if (imagesEverywhere) {
+        MissionItem* item = new MissionItem(seqNum++,
+                                            MAV_CMD_DO_SET_CAM_TRIGG_DIST,
+                                            MAV_FRAME_MISSION,
+                                            0,           // stop triggering
+                                            0,           // shutter integration (ignore)
+                                            0,           // trigger immediately when starting
+                                            0, 0, 0, 0,  // param 4-7 unused
+                                            true,        // autoContinue
+                                            false,       // isCurrentItem
+                                            missionItemParent);
+        items.append(item);
+    }
 }
 
 void CorridorScanComplexItem::applyNewAltitude(double newAltitude)
 {
-    Q_UNUSED(newAltitude);
-    // FIXME: NYI
-    //_altitudeFact.setRawValue(newAltitude);
+    _cameraCalc.valueSetIsDistance()->setRawValue(true);
+    _cameraCalc.distanceToSurface()->setRawValue(newAltitude);
+    _cameraCalc.setDistanceToSurfaceRelative(true);
 }
 
 void CorridorScanComplexItem::_polylineDirtyChanged(bool dirty)
@@ -400,11 +437,22 @@ void CorridorScanComplexItem::_rebuildTransects(void)
         }
     }
 
+    // Calculate distance flown for complex item
+    _complexDistance = 0;
+    for (int i=0; i<_transectPoints.count() - 2; i++) {
+        _complexDistance += _transectPoints[i].value<QGeoCoordinate>().distanceTo(_transectPoints[i+1].value<QGeoCoordinate>());
+    }
+
+    if (_cameraTriggerInTurnAroundFact.rawValue().toDouble()) {
+        _cameraShots = qCeil(_complexDistance / _cameraCalc.adjustedFootprintFrontal()->rawValue().toDouble());
+    }
+
     _coordinate = _transectPoints.count() ? _transectPoints.first().value<QGeoCoordinate>() : QGeoCoordinate();
     _exitCoordinate = _transectPoints.count() ? _transectPoints.last().value<QGeoCoordinate>() : QGeoCoordinate();
 
     emit transectPointsChanged();
     emit cameraShotsChanged();
+    emit complexDistanceChanged();
     emit coordinateChanged(_coordinate);
     emit exitCoordinateChanged(_exitCoordinate);
 }
