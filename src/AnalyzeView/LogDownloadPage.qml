@@ -155,7 +155,7 @@ AnalyzePage {
                         fileDialog.qgcView =        logDownloadPage
                         fileDialog.title =          qsTr("Select save directory")
                         fileDialog.selectExisting = true
-                        fileDialog.folder =         QGroundControl.settingsManager.appSettings.telemetrySavePath
+                        fileDialog.folder =         QGroundControl.settingsManager.appSettings.logSavePath
                         fileDialog.selectFolder =   true
                         fileDialog.openForLoad()
                     }
@@ -186,7 +186,7 @@ AnalyzePage {
                             message:    qsTr("All log files will be erased permanently. Is this really what you want?")
 
                             function accept() {
-                                logDownloadPage.hideDialog()
+                                hideDialog()
                                 logController.eraseAll()
                             }
                         }

@@ -126,6 +126,7 @@ public:
     void        saveSettings         (QSettings& settings, const QString& root);
     void        updateSettings       ();
     bool        isAutoConnectAllowed () { return true; }
+    bool        isHighLatencyAllowed () { return true; }
     QString     settingsURL          () { return "UdpSettings.qml"; }
 
 signals:
@@ -183,6 +184,7 @@ private:
     bool    _connect                (void) override;
     void    _disconnect             (void) override;
 
+    bool    _isIpLocal              (const QHostAddress& add);
     bool    _hardwareConnect        ();
     void    _restartConnection      ();
     void    _registerZeroconf       (uint16_t port, const std::string& regType);
@@ -193,11 +195,12 @@ private:
     DNSServiceRef  _dnssServiceRef;
 #endif
 
-    bool                _running;
-    QUdpSocket*         _socket;
-    UDPConfiguration*   _udpConfig;
-    bool                _connectState;
-    QList<UDPCLient*>   _sessionTargets;
+    bool                    _running;
+    QUdpSocket*             _socket;
+    UDPConfiguration*       _udpConfig;
+    bool                    _connectState;
+    QList<UDPCLient*>       _sessionTargets;
+    QList<QHostAddress>     _localAddress;
 
 };
 
